@@ -1,0 +1,3 @@
+m variable01 = 01;
+m variable02 = 02;
+show "The future language start here";
