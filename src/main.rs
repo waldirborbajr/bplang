@@ -72,7 +72,7 @@ fn tokenize(input: &str) -> Vec<Token> {
             ' ' | '\n' | '\t' => {
                 chars.next(); // skip whitespace
             }
-            _ => panic!("Unexpected character: {}", ch),
+            _ => panic!("Unexpected character: {:?}", ch),
         }
     }
 
@@ -239,11 +239,11 @@ fn main() -> io::Result<()> {
 
     // Step 2: Tokenize the BP source code
     let tokens = tokenize(&source_code);
-    println!("Tokens: {:?}", tokens);
+    //println!("Tokens: {:?}", tokens);
 
     // Step 3: Parse tokens into AST
     let ast = parse(&tokens);
-    println!("AST: {:?}", ast);
+    //println!("AST: {:?}", ast);
 
     // Step 4: Transpile AST to C code and write to `main.c`
     transpile_and_write_c(ast, "main.c")?;
