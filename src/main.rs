@@ -1,5 +1,6 @@
 use std::fs::File;
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
+use std::process::Command;
 use std::collections::HashMap;
 use std::path::Path;
 use rustyline::DefaultEditor;
@@ -210,15 +211,27 @@ fn run_prompt() {
                     break;
                 }
 
-                let tokens = tokenize(input);
-                let ast = parse(&tokens);
-                interpret(ast, &mut variables, true);
-            }
-            // Ctrl+C or Ctrl+D
-            Err(ReadlineError::Interrupted) | Err(ReadlineError::Eof) => break,
-            Err(err) => {
-                eprintln!("Input error: {:?}", err);
-                break;
+        let tokens = tokenize(input);
+        let ast = parse(&tokens);
+
+        for node in ast {
+            match node {
+                ASTNode::Show(s) => println!("{}", s),
+                ASTNode::VariableDeclaration { name, value } => {
+                    let val_str = match *value {
+                        ASTNode::StringLiteral(s) => {
+                            variables.insert(name.clone(), s.clone());
+                            format!("\"{}\"", s)
+                        }
+                        ASTNode::NumberLiteral(n) => {
+                            variables.insert(name.clone(), n.to_string());
+                            n.to_string()
+                        }
+                        _ => "unknown".to_string(),
+                    };
+                    println!("{} = {}", name, val_str);
+                }
+                _ => {}
             }
         }
     }
