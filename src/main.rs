@@ -1,6 +1,5 @@
 use std::fs::File;
 use std::io::{self, Read, Write};
-use std::process::Command;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -147,27 +146,35 @@ fn parse(tokens: &[Token]) -> Vec<ASTNode> {
     ast
 }
 
-// Transpile to C (file mode)
-fn transpile_and_write_c(ast: Vec<ASTNode>, output_file: &str) -> io::Result<()> {
-    let mut c_code = String::from("#include <stdio.h>\n\nint main() {\n");
+// Execute an AST directly. Shared by file mode and the REPL so both run
+// BPLang the same way — no C, no external compiler.
+//
+// `interactive`: when true (REPL), variable declarations echo `name = value`
+// like a shell would. In file mode this is off, matching the previous
+// behavior where declarations produced no output unless `show`n.
+fn interpret(ast: Vec<ASTNode>, variables: &mut HashMap<String, String>, interactive: bool) {
     for node in ast {
         match node {
-            ASTNode::VariableDeclaration { name, value } => match *value {
-                ASTNode::NumberLiteral(num) => c_code.push_str(&format!("    int {} = {};\n", name, num)),
-                ASTNode::StringLiteral(s) => c_code.push_str(&format!("    char {}[] = \"{}\";\n", name, s)),
-                _ => {}
-            },
-            ASTNode::Show(s) => {
-                c_code.push_str(&format!("    printf(\"{}\\n\");\n", s));
+            ASTNode::Show(s) => println!("{}", s),
+            ASTNode::VariableDeclaration { name, value } => {
+                let val_str = match *value {
+                    ASTNode::StringLiteral(s) => {
+                        variables.insert(name.clone(), s.clone());
+                        format!("\"{}\"", s)
+                    }
+                    ASTNode::NumberLiteral(n) => {
+                        variables.insert(name.clone(), n.to_string());
+                        n.to_string()
+                    }
+                    _ => "unknown".to_string(),
+                };
+                if interactive {
+                    println!("{} = {}", name, val_str);
+                }
             }
             _ => {}
         }
     }
-    c_code.push_str("    return 0;\n}\n");
-
-    let mut file = File::create(output_file)?;
-    file.write_all(c_code.as_bytes())?;
-    Ok(())
 }
 
 fn run_file() -> io::Result<()> {
@@ -178,23 +185,8 @@ fn run_file() -> io::Result<()> {
     let tokens = tokenize(&source_code);
     let ast = parse(&tokens);
 
-    transpile_and_write_c(ast, "main.c")?;
-    println!("C code generated → main.c");
-
-    let compile = Command::new("gcc")
-        .arg("main.c")
-        .arg("-o")
-        .arg("main")
-        .output()?;
-
-    if !compile.status.success() {
-        eprintln!("Compilation failed:\n{}", String::from_utf8_lossy(&compile.stderr));
-        return Err(io::Error::new(io::ErrorKind::Other, "gcc failed"));
-    }
-
-    println!("Running program...");
-    let output = Command::new("./main").output()?;
-    print!("{}", String::from_utf8_lossy(&output.stdout));
+    let mut variables: HashMap<String, String> = HashMap::new();
+    interpret(ast, &mut variables, false);
     Ok(())
 }
 
@@ -218,27 +210,7 @@ fn run_prompt() {
 
         let tokens = tokenize(input);
         let ast = parse(&tokens);
-
-        for node in ast {
-            match node {
-                ASTNode::Show(s) => println!("{}", s),
-                ASTNode::VariableDeclaration { name, value } => {
-                    let val_str = match *value {
-                        ASTNode::StringLiteral(s) => {
-                            variables.insert(name.clone(), s.clone());
-                            format!("\"{}\"", s)
-                        }
-                        ASTNode::NumberLiteral(n) => {
-                            variables.insert(name.clone(), n.to_string());
-                            n.to_string()
-                        }
-                        _ => "unknown".to_string(),
-                    };
-                    println!("{} = {}", name, val_str);
-                }
-                _ => {}
-            }
-        }
+        interpret(ast, &mut variables, true);
     }
 }
 
