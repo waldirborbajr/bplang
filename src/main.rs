@@ -1,6 +1,8 @@
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::process::Command;
+use std::collections::HashMap;
+use std::path::Path;
 
 // Define the different types of tokens
 #[derive(Debug, PartialEq, Clone)]
@@ -18,7 +20,6 @@ enum Token {
 fn tokenize(input: &str) -> Vec<Token> {
     let mut tokens = Vec::new();
     let mut chars = input.chars().peekable();
-
     while let Some(&ch) = chars.peek() {
         match ch {
             '=' => {
@@ -52,7 +53,9 @@ fn tokenize(input: &str) -> Vec<Token> {
                     }
                     chars.next();
                 }
-                tokens.push(Token::Number(num.parse::<i32>().unwrap()));
+                if let Ok(n) = num.parse::<i32>() {
+                    tokens.push(Token::Number(n));
+                }
             }
             'a'..='z' | 'A'..='Z' => {
                 let mut ident = String::new();
@@ -69,13 +72,15 @@ fn tokenize(input: &str) -> Vec<Token> {
                     _ => tokens.push(Token::Identifier(ident)),
                 }
             }
-            ' ' | '\n' | '\t' => {
+            ' ' | '\n' | '\t' | '\r' => {
                 chars.next(); // skip whitespace
             }
-            _ => panic!("Unexpected character: {:?}", ch),
+            _ => {
+                println!("Unexpected character: {:?}", ch);
+                chars.next();
+            }
         }
     }
-
     tokens.push(Token::EndOfFile);
     tokens
 }
@@ -87,190 +92,161 @@ enum ASTNode {
     StringLiteral(String),
     NumberLiteral(i32),
     Show(String),
+    // Future: ShowVar(String), BinaryExpr, etc.
 }
 
-// Parse tokens into an AST
+// Parse tokens into an AST (kept mostly as-is, improved robustness)
 fn parse(tokens: &[Token]) -> Vec<ASTNode> {
     let mut ast = Vec::new();
     let mut idx = 0;
-
     while idx < tokens.len() {
         match &tokens[idx] {
-            Token::Keyword(k) => {
-                match k.as_str() {
-                    "m" | "c" => {
-                        if idx + 1 < tokens.len() {
-                            if let Token::Identifier(name) = &tokens[idx + 1] {
-                                if idx + 2 < tokens.len() {
-                                    if let Token::Equals = &tokens[idx + 2] {
-                                        if idx + 3 < tokens.len() {
-                                            match &tokens[idx + 3] {
-                                                Token::Number(num) => {
-                                                    ast.push(ASTNode::VariableDeclaration {
-                                                        name: name.clone(),
-                                                        value: Box::new(ASTNode::NumberLiteral(
-                                                            *num,
-                                                        )),
-                                                    });
-                                                    idx += 4; // Move past the variable declaration
-                                                }
-                                                Token::StringLiteral(s) => {
-                                                    ast.push(ASTNode::VariableDeclaration {
-                                                        name: name.clone(),
-                                                        value: Box::new(ASTNode::StringLiteral(
-                                                            s.clone(),
-                                                        )),
-                                                    });
-                                                    idx += 4; // Move past the variable declaration
-                                                }
-                                                _ => {
-                                                    println!("Unexpected value after `=` at token index: {}", idx + 3);
-                                                    idx += 1; // Move to the next token
-                                                }
-                                            }
-                                        } else {
-                                            println!("Expected a value after `=` but reached end of tokens.");
-                                            idx += 1;
-                                        }
-                                    } else {
-                                        println!(
-                                            "Expected `=` after identifier `{}` at token index: {}",
-                                            name,
-                                            idx + 1
-                                        );
-                                        idx += 1; // Move to the next token
-                                    }
-                                } else {
-                                    println!(
-                                        "Expected `=` after identifier but reached end of tokens."
-                                    );
-                                    idx += 1;
+            Token::Keyword(k) => match k.as_str() {
+                "m" | "c" => {
+                    if let Some(Token::Identifier(name)) = tokens.get(idx + 1) {
+                        if let Some(Token::Equals) = tokens.get(idx + 2) {
+                            match tokens.get(idx + 3) {
+                                Some(Token::Number(num)) => {
+                                    ast.push(ASTNode::VariableDeclaration {
+                                        name: name.clone(),
+                                        value: Box::new(ASTNode::NumberLiteral(*num)),
+                                    });
+                                    idx += 4;
+                                    continue;
                                 }
-                            } else {
-                                println!(
-                                    "Expected identifier after keyword `{}` at token index: {}",
-                                    k,
-                                    idx + 1
-                                );
-                                idx += 1;
+                                Some(Token::StringLiteral(s)) => {
+                                    ast.push(ASTNode::VariableDeclaration {
+                                        name: name.clone(),
+                                        value: Box::new(ASTNode::StringLiteral(s.clone())),
+                                    });
+                                    idx += 4;
+                                    continue;
+                                }
+                                _ => {}
                             }
-                        } else {
-                            println!("Expected identifier but reached end of tokens.");
-                            idx += 1;
                         }
                     }
-                    "show" => {
-                        if idx + 1 < tokens.len() {
-                            if let Token::StringLiteral(s) = &tokens[idx + 1] {
-                                ast.push(ASTNode::Show(s.clone()));
-                                idx += 2; // Move past the `show` statement
-                            } else {
-                                println!(
-                                    "Expected string literal after `show` at token index: {}",
-                                    idx + 1
-                                );
-                                idx += 1;
-                            }
-                        } else {
-                            println!("Expected string literal but reached end of tokens.");
-                            idx += 1;
-                        }
-                    }
-                    _ => {
-                        println!("Unknown keyword: {} at token index: {}", k, idx);
-                        idx += 1; // Move to the next token
-                    }
+                    println!("Invalid variable declaration at token {}", idx);
+                    idx += 1;
                 }
-            }
-            Token::Semicolon => {
-                // Skip semicolons, move to the next token
-                idx += 1;
-            }
-            Token::EndOfFile => {
-                break; // Exit the loop when end of file token is reached
-            }
-            _ => {
-                println!("Unexpected token: {:?} at index: {}", tokens[idx], idx);
-                idx += 1; // Move to the next token
-            }
+                "show" => {
+                    if let Some(Token::StringLiteral(s)) = tokens.get(idx + 1) {
+                        ast.push(ASTNode::Show(s.clone()));
+                        idx += 2;
+                        continue;
+                    }
+                    println!("Expected string after 'show'");
+                    idx += 1;
+                }
+                _ => idx += 1,
+            },
+            Token::Semicolon | Token::EndOfFile => break,
+            _ => idx += 1,
         }
     }
-
     ast
 }
 
-// Transpile AST into C code and write it to a file
+// Transpile to C (file mode)
 fn transpile_and_write_c(ast: Vec<ASTNode>, output_file: &str) -> io::Result<()> {
     let mut c_code = String::from("#include <stdio.h>\n\nint main() {\n");
-
     for node in ast {
         match node {
             ASTNode::VariableDeclaration { name, value } => match *value {
-                ASTNode::NumberLiteral(num) => {
-                    c_code.push_str(&format!("    int {} = {};\n", name, num));
-                }
-                ASTNode::StringLiteral(s) => {
-                    c_code.push_str(&format!("    char {}[] = \"{}\";\n", name, s));
-                }
+                ASTNode::NumberLiteral(num) => c_code.push_str(&format!("    int {} = {};\n", name, num)),
+                ASTNode::StringLiteral(s) => c_code.push_str(&format!("    char {}[] = \"{}\";\n", name, s)),
                 _ => {}
             },
             ASTNode::Show(s) => {
                 c_code.push_str(&format!("    printf(\"{}\\n\");\n", s));
             }
-            _ => {} // Handles other unhandled ASTNode variants
+            _ => {}
         }
     }
+    c_code.push_str("    return 0;\n}\n");
 
-    c_code.push_str("    return 0;\n}");
-
-    // Write the C code to the output file
     let mut file = File::create(output_file)?;
     file.write_all(c_code.as_bytes())?;
-
     Ok(())
 }
 
-fn main() -> io::Result<()> {
-    // Step 1: Read BP source code from the `main.bp` file
+fn run_file() -> io::Result<()> {
     let bp_file_path = "main.bp";
-    let mut bp_file = File::open(bp_file_path)?;
     let mut source_code = String::new();
-    bp_file.read_to_string(&mut source_code)?;
+    File::open(bp_file_path)?.read_to_string(&mut source_code)?;
 
-    // Step 2: Tokenize the BP source code
     let tokens = tokenize(&source_code);
-    //println!("Tokens: {:?}", tokens);
-
-    // Step 3: Parse tokens into AST
     let ast = parse(&tokens);
-    //println!("AST: {:?}", ast);
 
-    // Step 4: Transpile AST to C code and write to `main.c`
     transpile_and_write_c(ast, "main.c")?;
-    println!("C code has been generated and written to main.c");
+    println!("C code generated → main.c");
 
-    // Step 5: Compile the generated C code using `gcc`
-    let output = Command::new("gcc")
+    let compile = Command::new("gcc")
         .arg("main.c")
         .arg("-o")
-        .arg("main") // Output binary file `main`
+        .arg("main")
         .output()?;
 
-    // Check if the compilation was successful
-    if !output.status.success() {
-        println!("Compilation failed:");
-        io::stderr().write_all(&output.stderr)?;
-        return Err(io::Error::new(io::ErrorKind::Other, "C compilation failed"));
+    if !compile.status.success() {
+        eprintln!("Compilation failed:\n{}", String::from_utf8_lossy(&compile.stderr));
+        return Err(io::Error::new(io::ErrorKind::Other, "gcc failed"));
     }
 
-    println!("Compilation successful, running the program...");
-
-    // Step 6: Execute the compiled binary
-    let execution_output = Command::new("./main").output()?;
-
-    // Print the output of the program
-    println!("Program output:");
-    io::stdout().write_all(&execution_output.stdout)?;
-
+    println!("Running program...");
+    let output = Command::new("./main").output()?;
+    print!("{}", String::from_utf8_lossy(&output.stdout));
     Ok(())
+}
+
+fn run_prompt() {
+    println!("BP Interactive Prompt (type 'exit' or Ctrl+C to quit)");
+    let mut variables: HashMap<String, String> = HashMap::new();
+
+    loop {
+        print!("> ");
+        io::stdout().flush().unwrap();
+
+        let mut line = String::new();
+        if io::stdin().read_line(&mut line).is_err() || line.trim().is_empty() {
+            continue;
+        }
+        let input = line.trim();
+
+        if input == "exit" || input == "quit" {
+            break;
+        }
+
+        let tokens = tokenize(input);
+        let ast = parse(&tokens);
+
+        for node in ast {
+            match node {
+                ASTNode::Show(s) => println!("{}", s),
+                ASTNode::VariableDeclaration { name, value } => {
+                    let val_str = match *value {
+                        ASTNode::StringLiteral(s) => {
+                            variables.insert(name.clone(), s.clone());
+                            format!("\"{}\"", s)
+                        }
+                        ASTNode::NumberLiteral(n) => {
+                            variables.insert(name.clone(), n.to_string());
+                            n.to_string()
+                        }
+                        _ => "unknown".to_string(),
+                    };
+                    println!("{} = {}", name, val_str);
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+fn main() -> io::Result<()> {
+    if Path::new("main.bp").exists() {
+        run_file()
+    } else {
+        run_prompt();
+        Ok(())
+    }
 }
