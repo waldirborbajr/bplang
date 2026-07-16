@@ -47,7 +47,7 @@ fn tokenize(input: &str) -> Vec<Token> {
             '0'..='9' => {
                 let mut num = String::new();
                 while let Some(&ch) = chars.peek() {
-                    if ch.is_digit(10) {
+                    if ch.is_ascii_digit() {
                         num.push(ch);
                     } else {
                         break;
