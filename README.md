@@ -1,3 +1,8 @@
+<p align="center">
+  <img width="256" height="256" src="./assets/logo.png" />
+</p>
+<h1 align="center">TMS, A clean, fast, and modern tmux session manager written in Go</h1>
+
 **WARNING** This project is in its very initial development stage, not all
 features are implemented yet, usage API still subjected to change until `1.0.0`
 
